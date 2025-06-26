@@ -1,0 +1,6 @@
+Flask
+flask-cors
+python-docx
+boto3
+python-dotenv
+docx2pdf
