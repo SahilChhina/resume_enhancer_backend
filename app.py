@@ -4,6 +4,7 @@ import boto3
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from docx import Document
+from docx.shared import Pt
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
@@ -56,12 +57,6 @@ def enhance_resume():
         if skills_start is None:
             return jsonify({"error": "Couldn't find a 'Skills' section in the resume."}), 400
 
-        skills_end = len(paragraphs)
-        for j in range(skills_start + 1, len(paragraphs)):
-            if paragraphs[j].text.strip().isupper():
-                skills_end = j
-                break
-
         original_para = doc.paragraphs[skills_start + 1]
         original_text = original_para.text.strip()
 
@@ -102,20 +97,28 @@ Identify new skills that align with the job posting but are not already listed. 
         enhanced_skills_text = result["content"][0]["text"].strip().rstrip(",")
 
         combined_text = original_text.rstrip(",") + ", " + enhanced_skills_text.lstrip(", ")
-        original_para.text = combined_text
 
-        for run in original_para.runs:
-            run.font.size = original_para.runs[0].font.size
-            run.font.name = original_para.runs[0].font.name
+        # Clear and preserve formatting
+        original_para.clear()
+        font_name = "Calibri"
+        font_size = Pt(11)
+
+        if original_para.runs:
+            if original_para.runs[0].font.name:
+                font_name = original_para.runs[0].font.name
+            if original_para.runs[0].font.size:
+                font_size = original_para.runs[0].font.size
+
+        new_run = original_para.add_run(combined_text)
+        new_run.font.name = font_name
+        new_run.font.size = font_size
 
         docx_path = os.path.join(app.config['UPLOAD_FOLDER'], "enhanced_resume.docx")
         doc.save(docx_path)
 
-        # ✅ Convert DOCX to PDF using LibreOffice
+        # Convert to PDF via LibreOffice
         pdf_path = docx_path.replace(".docx", ".pdf")
-        conversion_command = f"libreoffice --headless --convert-to pdf --outdir {app.config['UPLOAD_FOLDER']} {docx_path}"
-        print("📄 Converting DOCX to PDF with command:", conversion_command)
-        os.system(conversion_command)
+        os.system(f"libreoffice --headless --convert-to pdf --outdir {app.config['UPLOAD_FOLDER']} {docx_path}")
 
         return send_file(docx_path, as_attachment=True)
 
