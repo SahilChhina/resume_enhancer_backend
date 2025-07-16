@@ -6,9 +6,8 @@ from flask_cors import CORS
 from docx import Document
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
-# from docx2pdf import convert  # ❌ Not supported on Render Linux servers
 
-# Load AWS credentials
+# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
@@ -49,8 +48,6 @@ def enhance_resume():
         paragraphs = list(doc.paragraphs)
 
         skills_start = None
-        skills_end = None
-
         for i, para in enumerate(paragraphs):
             if 'skills' in para.text.lower():
                 skills_start = i
@@ -59,12 +56,11 @@ def enhance_resume():
         if skills_start is None:
             return jsonify({"error": "Couldn't find a 'Skills' section in the resume."}), 400
 
+        skills_end = len(paragraphs)
         for j in range(skills_start + 1, len(paragraphs)):
             if paragraphs[j].text.strip().isupper():
                 skills_end = j
                 break
-        else:
-            skills_end = len(paragraphs)
 
         original_para = doc.paragraphs[skills_start + 1]
         original_text = original_para.text.strip()
@@ -115,9 +111,11 @@ Identify new skills that align with the job posting but are not already listed. 
         docx_path = os.path.join(app.config['UPLOAD_FOLDER'], "enhanced_resume.docx")
         doc.save(docx_path)
 
-        # ❌ Commented out since Render won't support docx2pdf
-        # pdf_path = docx_path.replace(".docx", ".pdf")
-        # convert(docx_path, pdf_path)
+        # ✅ Convert DOCX to PDF using LibreOffice
+        pdf_path = docx_path.replace(".docx", ".pdf")
+        conversion_command = f"libreoffice --headless --convert-to pdf --outdir {app.config['UPLOAD_FOLDER']} {docx_path}"
+        print("📄 Converting DOCX to PDF with command:", conversion_command)
+        os.system(conversion_command)
 
         return send_file(docx_path, as_attachment=True)
 
@@ -127,11 +125,10 @@ Identify new skills that align with the job posting but are not already listed. 
 
 @app.route("/preview", methods=["GET"])
 def preview_resume():
-    # Since PDF conversion is disabled, just serve the .docx if needed
-    docx_path = os.path.join(app.config['UPLOAD_FOLDER'], "enhanced_resume.docx")
-    if os.path.exists(docx_path):
-        return send_file(docx_path)
-    return jsonify({"error": "Enhanced resume not found."}), 404
+    pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], "enhanced_resume.pdf")
+    if os.path.exists(pdf_path):
+        return send_file(pdf_path, mimetype="application/pdf")
+    return jsonify({"error": "PDF not found"}), 404
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
