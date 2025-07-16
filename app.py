@@ -1,63 +1,94 @@
+import os
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from docx import Document
 from docx.shared import Pt
-from docx2pdf import convert
-import os
 from werkzeug.utils import secure_filename
 import uuid
+from docx2pdf import convert
+
+UPLOAD_FOLDER = "uploads"
+RESULTS_FOLDER = "results"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(RESULTS_FOLDER, exist_ok=True)
 
 app = Flask(__name__)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["RESULTS_FOLDER"] = RESULTS_FOLDER
 CORS(app)
 
-UPLOAD_FOLDER = 'static'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-@app.route('/')
+@app.route("/")
 def home():
-    return '✅ AI Resume Enhancer API is running!'
+    return "Resume Enhancer Backend is Running"
 
-@app.route('/enhance', methods=['POST'])
-def enhance_resume():
+
+@app.route("/enhance", methods=["POST"])
+def enhance():
+    print("Received request")
+
     if 'resume' not in request.files or 'jobDescription' not in request.form:
-        return jsonify({"status": "error", "message": "Missing file or job description"}), 400
+        print("Missing file or job description")
+        return jsonify({"status": "error", "message": "Missing resume or job description"}), 400
 
-    resume = request.files['resume']
-    job_description = request.form['jobDescription']
-    filename = secure_filename(resume.filename)
-    original_docx_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{uuid.uuid4()}_{filename}")
-    resume.save(original_docx_path)
+    resume = request.files["resume"]
+    job_desc = request.form["jobDescription"]
 
-    doc = Document(original_docx_path)
+    if resume.filename == "":
+        return jsonify({"status": "error", "message": "No selected file"}), 400
 
-    # Format matching setup
-    style = doc.styles['Normal']
-    font = style.font
-    font.name = 'Times New Roman'
-    font.size = Pt(11)
+    # Save uploaded resume
+    resume_filename = secure_filename(str(uuid.uuid4()) + ".docx")
+    resume_path = os.path.join(app.config["UPLOAD_FOLDER"], resume_filename)
+    resume.save(resume_path)
 
-    # Append AI-enhanced content
-    doc.add_paragraph("\nAI-Generated Enhancement Based on Job Description:\n", style='Normal')
-    doc.add_paragraph(job_description, style='Normal')
+    # Read original resume
+    try:
+        original_doc = Document(resume_path)
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Failed to open DOCX: {str(e)}"}), 500
 
-    enhanced_docx_filename = 'enhanced_resume.docx'
-    enhanced_docx_path = os.path.join(app.config['UPLOAD_FOLDER'], enhanced_docx_filename)
-    doc.save(enhanced_docx_path)
+    # Extract the formatting of the first paragraph
+    sample_paragraph = original_doc.paragraphs[0]
+    font_name = sample_paragraph.runs[0].font.name if sample_paragraph.runs else "Times New Roman"
+    font_size = sample_paragraph.runs[0].font.size.pt if sample_paragraph.runs[0].font.size else 11
 
-    enhanced_pdf_filename = 'enhanced_resume.pdf'
-    enhanced_pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], enhanced_pdf_filename)
-    convert(enhanced_docx_path, enhanced_pdf_path)
+    # Generate enhanced resume
+    enhanced_doc = Document()
+    p = enhanced_doc.add_paragraph()
+    run = p.add_run("Enhanced Resume Skills:\n" + job_desc.strip())
+    run.font.name = font_name
+    run.font.size = Pt(font_size)
 
+    # Save enhanced docx
+    enhanced_docx_filename = secure_filename(str(uuid.uuid4()) + "_enhanced.docx")
+    enhanced_docx_path = os.path.join(app.config["RESULTS_FOLDER"], enhanced_docx_filename)
+    enhanced_doc.save(enhanced_docx_path)
+
+    # Convert to PDF
+    enhanced_pdf_path = enhanced_docx_path.replace(".docx", ".pdf")
+    try:
+        convert(enhanced_docx_path, enhanced_pdf_path)
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Failed to convert to PDF: {str(e)}"}), 500
+
+    # Return download links
     return jsonify({
         "status": "success",
-        "docx_url": f"/static/{enhanced_docx_filename}",
-        "pdf_url": f"/static/{enhanced_pdf_filename}"
+        "docx_url": f"/results/{enhanced_docx_filename}",
+        "pdf_url": f"/results/{os.path.basename(enhanced_pdf_path)}"
     })
 
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+@app.route("/results/<path:filename>")
+def download_result(filename):
+    return send_from_directory(app.config["RESULTS_FOLDER"], filename, as_attachment=False)
+
+
+@app.route("/uploads/<path:filename>")
+def download_upload(filename):
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename, as_attachment=False)
+
+
+if __name__ == "__main__":
+    app.run(debug=True, port=10000)
