@@ -1,10 +1,15 @@
 import os
 import uuid
+import logging
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from docx import Document
 from docx.shared import Pt
+
+# --------- Logging (goes to Render logs) ----------
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("resume-enhancer")
 
 # --------- Folders ----------
 UPLOAD_FOLDER = "uploads"
@@ -16,7 +21,7 @@ os.makedirs(RESULTS_FOLDER, exist_ok=True)
 app = Flask(__name__)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["RESULTS_FOLDER"] = RESULTS_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB cap
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB cap
 
 # Allow your GH Pages site and localhost dev
 CORS(app, resources={
@@ -35,32 +40,57 @@ def health():
 
 
 # --------- Enhance ----------
-@app.route("/enhance", methods=["POST"])
+@app.route("/enhance", methods=["POST", "OPTIONS"])
 def enhance():
-    # Basic validation
-    if "resume" not in request.files or "jobDescription" not in request.form:
-        return jsonify({"status": "error", "message": "Missing resume or jobDescription"}), 400
+    # Preflight handled by flask-cors, but return 200 explicitly
+    if request.method == "OPTIONS":
+        return ("", 204)
 
-    resume = request.files["resume"]
-    job_desc = request.form.get("jobDescription", "").strip()
+    # Debug: log what arrived
+    log.info("---- /enhance hit ----")
+    log.info("Content-Type: %s", request.content_type)
+    log.info("Content-Length: %s", request.content_length)
+    log.info("Files keys: %s", list(request.files.keys()))
+    log.info("Form keys:  %s", list(request.form.keys()))
 
-    if resume.filename == "":
-        return jsonify({"status": "error", "message": "No selected file"}), 400
-    if not job_desc:
-        return jsonify({"status": "error", "message": "Job description is empty"}), 400
+    # Accept common variants just in case
+    file = request.files.get("resume") or request.files.get("file") or request.files.get("upload")
+    jd = (
+        request.form.get("jobDescription")
+        or request.form.get("jobdescription")
+        or request.form.get("description")
+        or ""
+    ).strip()
+
+    if not file:
+        msg = "Missing 'resume' file in form-data (key: resume)"
+        log.warning(msg)
+        return jsonify({"status": "error", "message": msg}), 400
+
+    if not file.filename:
+        msg = "No selected file"
+        log.warning(msg)
+        return jsonify({"status": "error", "message": msg}), 400
+
+    if not jd:
+        msg = "Missing or empty 'jobDescription' in form-data"
+        log.warning(msg)
+        return jsonify({"status": "error", "message": msg}), 400
 
     # Save uploaded resume
     resume_filename = secure_filename(f"{uuid.uuid4()}.docx")
     resume_path = os.path.join(app.config["UPLOAD_FOLDER"], resume_filename)
-    resume.save(resume_path)
+    file.save(resume_path)
+    log.info("Saved upload -> %s", resume_path)
 
     # Read original resume with defensive checks
     try:
         original_doc = Document(resume_path)
     except Exception as e:
+        log.exception("Failed to open DOCX")
         return jsonify({"status": "error", "message": f"Failed to open DOCX: {e}"}), 500
 
-    # Try to borrow font styling from the first run if present
+    # Borrow some font styling if present
     font_name = "Times New Roman"
     font_size_pt = 11
     try:
@@ -73,12 +103,12 @@ def enhance():
                 if r0.font.size:
                     font_size_pt = int(r0.font.size.pt)
     except Exception:
-        pass  # fall back to defaults
+        pass  # keep defaults
 
     # Create a simple "enhanced" document (placeholder logic)
     enhanced_doc = Document()
     p = enhanced_doc.add_paragraph()
-    run = p.add_run("Enhanced Resume Skills:\n" + job_desc)
+    run = p.add_run("Enhanced Resume Skills:\n" + jd)
     run.font.name = font_name
     run.font.size = Pt(font_size_pt)
 
@@ -86,29 +116,15 @@ def enhance():
     enhanced_docx_filename = secure_filename(f"{uuid.uuid4()}_enhanced.docx")
     enhanced_docx_path = os.path.join(app.config["RESULTS_FOLDER"], enhanced_docx_filename)
     enhanced_doc.save(enhanced_docx_path)
+    log.info("Saved result DOCX -> %s", enhanced_docx_path)
 
-    # Try PDF conversion (will fail on Linux/Render without LibreOffice)
-    pdf_url = None
-    try:
-        # Optional: attempt conversion if docx2pdf is available & supported
-        from docx2pdf import convert  # noqa: E402
-        enhanced_pdf_path = enhanced_docx_path.replace(".docx", ".pdf")
-        convert(enhanced_docx_path, enhanced_pdf_path)
-        if os.path.exists(enhanced_pdf_path):
-            pdf_url = f"/results/{os.path.basename(enhanced_pdf_path)}"
-    except Exception as e:
-        # On Render (Linux), docx2pdf typically fails — we proceed without PDF
-        print(f"[warn] PDF conversion failed: {e}")
-
+    # On Render/Linux, docx2pdf usually fails; skip to keep flow unblocked.
     response = {
         "status": "success",
         "docx_url": f"/results/{enhanced_docx_filename}",
+        "message": "PDF preview not generated on this host; download DOCX instead."
     }
-    if pdf_url:
-        response["pdf_url"] = pdf_url
-    else:
-        response["message"] = "PDF preview unavailable on this host. Download the DOCX instead."
-
+    log.info("Success response -> %s", response)
     return jsonify(response), 200
 
 
