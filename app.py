@@ -9,6 +9,7 @@ from copy import deepcopy
 
 from flask import Flask, request, jsonify, send_file, abort, url_for
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 from docx import Document
 from dotenv import load_dotenv
@@ -30,6 +31,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("resume-enhancer")
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20MB
 CORS(app)
 
