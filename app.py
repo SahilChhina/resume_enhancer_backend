@@ -26,19 +26,12 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 MAX_OUTPUT_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "8000"))
 
-ALLOWED_ORIGINS = [
-    o.strip() for o in os.getenv(
-        "ALLOWED_ORIGINS",
-        "https://sahilchhina.github.io,http://localhost:3000,http://localhost:5173"
-    ).split(",") if o.strip()
-]
-
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("resume-enhancer")
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20MB
-CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
+CORS(app)
 
 _anthropic = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
