@@ -67,16 +67,19 @@ def extract_paragraphs(doc: Document):
 
 
 def replace_paragraph_text(paragraph, new_text: str):
-    """Replace paragraph text while preserving the first run's formatting."""
-    if not paragraph.runs:
-        paragraph.add_run(new_text)
-        return
-
-    first_run = paragraph.runs[0]
-    # Clear runs after the first
-    for run in paragraph.runs[1:]:
+    """Replace paragraph text, locking font to Times New Roman 10pt."""
+    # Clear all existing runs
+    for run in paragraph.runs:
         run.text = ""
-    first_run.text = new_text
+
+    if paragraph.runs:
+        target = paragraph.runs[0]
+    else:
+        target = paragraph.add_run()
+
+    target.text = new_text
+    target.font.name = "Times New Roman"
+    target.font.size = Pt(10)
 
 
 SYSTEM_PROMPT = """You are an expert resume editor. You rewrite resume bullets and summary text so the candidate's existing experience is presented in language that aligns with a target job description — without inventing skills, employers, dates, projects, or accomplishments the candidate has not actually done.
