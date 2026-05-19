@@ -12,6 +12,7 @@ from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 from docx import Document
+from docx.shared import Pt
 from dotenv import load_dotenv
 from anthropic import Anthropic
 
